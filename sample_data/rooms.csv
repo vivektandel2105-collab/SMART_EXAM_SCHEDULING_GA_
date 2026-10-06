@@ -1,0 +1,6 @@
+room_number,building,floor,capacity,room_type
+A101,Main Academic Block,1,60,CLASSROOM
+A102,Main Academic Block,1,60,CLASSROOM
+A201,Main Academic Block,2,100,AUDITORIUM
+B101,Science Block,1,40,LAB
+B102,Science Block,1,40,LAB

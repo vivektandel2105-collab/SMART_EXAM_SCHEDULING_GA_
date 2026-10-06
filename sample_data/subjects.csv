@@ -1,0 +1,6 @@
+subject_code,subject_name,department_code,program_code,semester,exam_duration_minutes
+CSE3001,Database Management Systems,CS,BTECH-CS,6,180
+CSE3002,Operating Systems,CS,BTECH-CS,6,180
+CSE3003,Computer Networks,CS,BTECH-CS,6,180
+CSE3004,Theory of Computation,CS,BTECH-CS,6,180
+CSE3005,Artificial Intelligence,CS,BTECH-CS,6,180

@@ -1,0 +1,6 @@
+employee_id,name,email,department_code,designation
+FAC001,Dr. Rajesh Kumar,rajesh.kumar@smartexam.edu,CS,Professor
+FAC002,Dr. Meena Iyer,meena.iyer@smartexam.edu,CS,Associate Professor
+FAC003,Prof. Suresh Nair,suresh.nair@smartexam.edu,CS,Assistant Professor
+FAC004,Dr. Priya Gupta,priya.gupta@smartexam.edu,CS,Associate Professor
+FAC005,Prof. Amit Joshi,amit.joshi@smartexam.edu,CS,Assistant Professor
