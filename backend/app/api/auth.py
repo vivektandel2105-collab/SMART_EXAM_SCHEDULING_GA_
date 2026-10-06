@@ -40,7 +40,7 @@ def login(
             detail="User account is deactivated",
         )
 
-    access_token = create_access_token(subject=user.id)
+    access_token = create_access_token(subject=user.email)
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -133,7 +133,7 @@ def login_oauth2_form(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token = create_access_token(subject=user.id)
+    access_token = create_access_token(subject=user.email)
     return {
         "access_token": access_token,
         "token_type": "bearer",

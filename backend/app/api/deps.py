@@ -34,7 +34,10 @@ def get_current_user(
     except jwt.PyJWTError:
         raise credentials_exception
 
-    user = db.query(User).filter(User.id == token_data.sub).first()
+    sub_val = str(token_data.sub)
+    user = db.query(User).filter(
+        (User.id == sub_val) | (User.email == sub_val.lower())
+    ).first()
     if user is None:
         raise credentials_exception
     if not user.is_active:
