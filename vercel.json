@@ -1,13 +1,10 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
   "services": {
     "backend": {
-      "path": "backend",
       "public": true,
       "pathPrefix": "/api"
     },
     "frontend": {
-      "path": "frontend",
       "public": true,
       "pathPrefix": "/"
     }
