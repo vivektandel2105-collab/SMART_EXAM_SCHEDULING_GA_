@@ -49,21 +49,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register API Routers
-app.include_router(auth_router, prefix=settings.API_V1_STR)
-app.include_router(departments_router, prefix=settings.API_V1_STR)
-app.include_router(programs_router, prefix=settings.API_V1_STR)
-app.include_router(semesters_router, prefix=settings.API_V1_STR)
-app.include_router(divisions_router, prefix=settings.API_V1_STR)
-app.include_router(students_router, prefix=settings.API_V1_STR)
-app.include_router(subjects_router, prefix=settings.API_V1_STR)
-app.include_router(faculty_router, prefix=settings.API_V1_STR)
-app.include_router(rooms_router, prefix=settings.API_V1_STR)
-app.include_router(exam_slots_router, prefix=settings.API_V1_STR)
-app.include_router(import_router, prefix=settings.API_V1_STR)
-app.include_router(constraints_router, prefix=settings.API_V1_STR)
+# Register API Routers (both /api and root prefix for Vercel serverless routing)
+api_routers = [
+    auth_router, departments_router, programs_router, semesters_router,
+    divisions_router, students_router, subjects_router, faculty_router,
+    rooms_router, exam_slots_router, import_router, constraints_router
+]
+for r in api_routers:
+    app.include_router(r, prefix=settings.API_V1_STR)
+    app.include_router(r, prefix="")
+
 app.include_router(scheduler_router, prefix=f"{settings.API_V1_STR}/scheduler", tags=["Scheduler"])
+app.include_router(scheduler_router, prefix="/scheduler", tags=["Scheduler"])
+
 app.include_router(timetables_router, prefix=f"{settings.API_V1_STR}/timetables", tags=["Timetables"])
+app.include_router(timetables_router, prefix="/timetables", tags=["Timetables"])
 
 
 @app.get("/health", tags=["Health"])
