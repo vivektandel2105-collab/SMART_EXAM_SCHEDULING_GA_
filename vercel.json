@@ -1,29 +1,15 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "backend": {
+      "path": "backend",
+      "public": true,
+      "pathPrefix": "/api"
     },
-    {
-      "src": "api/index.py",
-      "use": "@vercel/python"
+    "frontend": {
+      "path": "frontend",
+      "public": true,
+      "pathPrefix": "/"
     }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "api/index.py"
-    },
-    {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "frontend/$1"
-    }
-  ]
+  }
 }
