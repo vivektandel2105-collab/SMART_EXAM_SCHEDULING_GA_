@@ -28,7 +28,7 @@ class GAConfig:
 
 @dataclass
 class GARunResult:
-    status: str  # COMPLETED, TARGET_REACHED, MAX_GENERATIONS_REACHED, TIMEOUT, CANCELLED, FAILED
+    status: str  # TARGET_REACHED, MAX_GENERATIONS_REACHED, TIMEOUT, CANCELLED, FAILED
     generation: int
     best_chromosome: Chromosome
     best_fitness: float
@@ -55,6 +55,30 @@ class GeneticAlgorithmEngine:
         start_time = time.time()
         rng = random.Random(config.random_seed) if config.random_seed is not None else random.Random()
 
+        # Immediate cancellation check
+        if cancellation_check and cancellation_check():
+            population = PopulationGenerator.generate_initial_population(
+                dataset=dataset,
+                population_size=config.population_size,
+                random_seed=config.random_seed,
+            )
+            FitnessEvaluator.evaluate_population(population, dataset)
+            best = population.get_best()
+            return GARunResult(
+                status="CANCELLED",
+                generation=0,
+                best_chromosome=best,
+                best_fitness=best.fitness,
+                hard_violations=best.hard_violations,
+                soft_penalty=best.soft_penalty,
+                execution_time_ms=0,
+                random_seed=config.random_seed,
+                metrics_history=[],
+            )
+
+        # Initialize dataset fast-lookup structures
+        dataset.init_conflict_structures()
+
         # 1. Initialize Population
         population = PopulationGenerator.generate_initial_population(
             dataset=dataset,
@@ -78,73 +102,93 @@ class GeneticAlgorithmEngine:
             "execution_time_ms": elapsed_ms,
         })
 
+        # Check immediate timeout
+        if config.time_limit_seconds and (time.time() - start_time) >= config.time_limit_seconds:
+            return GARunResult(
+                status="TIMEOUT" if best.hard_violations > 0 else "TARGET_REACHED",
+                generation=0,
+                best_chromosome=best,
+                best_fitness=best.fitness,
+                hard_violations=best.hard_violations,
+                soft_penalty=best.soft_penalty,
+                execution_time_ms=elapsed_ms,
+                random_seed=config.random_seed,
+                metrics_history=metrics_history,
+            )
+
         run_status = "MAX_GENERATIONS_REACHED"
+        if best.hard_violations == 0 and (config.target_soft_penalty is None or best.soft_penalty <= config.target_soft_penalty):
+            run_status = "TARGET_REACHED"
 
         # 3. Generational Optimization Loop
-        for gen in range(1, config.max_generations + 1):
-            # Check Cancellation
-            if cancellation_check and cancellation_check():
-                run_status = "CANCELLED"
-                break
-
-            # Check Time Limit
-            if config.time_limit_seconds and (time.time() - start_time) >= config.time_limit_seconds:
-                run_status = "TIMEOUT"
-                break
-
-            population.generation = gen
-
-            # Extract Elites directly into next generation
-            new_chromosomes = population.get_elites(config.elite_count)
-
-            # Generate Offspring
-            while len(new_chromosomes) < config.population_size:
-                parent_1 = TournamentSelector.select(population, config.tournament_size, rng)
-                parent_2 = TournamentSelector.select(population, config.tournament_size, rng)
-
-                child_1, child_2 = TimetableCrossover.crossover(
-                    parent_1, parent_2, config.crossover_rate, rng
-                )
-
-                # Mutate Offspring
-                child_1 = TimetableMutation.mutate(child_1, dataset, config.mutation_rate, rng)
-                child_2 = TimetableMutation.mutate(child_2, dataset, config.mutation_rate, rng)
-
-                # Repair Offspring
-                repaired_1, _ = TimetableRepair.repair(child_1, dataset)
-                repaired_2, _ = TimetableRepair.repair(child_2, dataset)
-
-                # Evaluate Offspring
-                FitnessEvaluator.evaluate_chromosome(repaired_1, dataset)
-                FitnessEvaluator.evaluate_chromosome(repaired_2, dataset)
-
-                new_chromosomes.append(repaired_1)
-                if len(new_chromosomes) < config.population_size:
-                    new_chromosomes.append(repaired_2)
-
-            population.chromosomes = new_chromosomes
-            population.sort_by_fitness()
-
-            best = population.get_best()
-            elapsed_ms = int((time.time() - start_time) * 1000)
-
-            metrics_history.append({
-                "generation": gen,
-                "best_fitness": best.fitness,
-                "hard_violations": best.hard_violations,
-                "soft_penalty": best.soft_penalty,
-                "is_valid": best.is_valid,
-                "execution_time_ms": elapsed_ms,
-            })
-
-            # Check Termination Condition (Zero Hard Violations & Target Soft Score)
-            if best.hard_violations == 0:
-                if config.target_soft_penalty is None or best.soft_penalty <= config.target_soft_penalty:
-                    run_status = "TARGET_REACHED"
+        if run_status != "TARGET_REACHED":
+            for gen in range(1, config.max_generations + 1):
+                # Check Cancellation
+                if cancellation_check and cancellation_check():
+                    run_status = "CANCELLED"
                     break
+
+                # Check Time Limit
+                if config.time_limit_seconds and (time.time() - start_time) >= config.time_limit_seconds:
+                    run_status = "TIMEOUT"
+                    break
+
+                population.generation = gen
+
+                # Extract Elites directly into next generation
+                new_chromosomes = population.get_elites(config.elite_count)
+
+                # Generate Offspring
+                while len(new_chromosomes) < config.population_size:
+                    parent_1 = TournamentSelector.select(population, config.tournament_size, rng)
+                    parent_2 = TournamentSelector.select(population, config.tournament_size, rng)
+
+                    child_1, child_2 = TimetableCrossover.crossover(
+                        parent_1, parent_2, config.crossover_rate, rng
+                    )
+
+                    # Mutate Offspring
+                    child_1 = TimetableMutation.mutate(child_1, dataset, config.mutation_rate, rng)
+                    child_2 = TimetableMutation.mutate(child_2, dataset, config.mutation_rate, rng)
+
+                    # Heuristic Repair
+                    repaired_1, _ = TimetableRepair.repair(child_1, dataset)
+                    repaired_2, _ = TimetableRepair.repair(child_2, dataset)
+
+                    # Evaluate Offspring
+                    FitnessEvaluator.evaluate_chromosome(repaired_1, dataset)
+                    FitnessEvaluator.evaluate_chromosome(repaired_2, dataset)
+
+                    new_chromosomes.append(repaired_1)
+                    if len(new_chromosomes) < config.population_size:
+                        new_chromosomes.append(repaired_2)
+
+                population.chromosomes = new_chromosomes
+                population.sort_by_fitness()
+
+                best = population.get_best()
+                elapsed_ms = int((time.time() - start_time) * 1000)
+
+                metrics_history.append({
+                    "generation": gen,
+                    "best_fitness": best.fitness,
+                    "hard_violations": best.hard_violations,
+                    "soft_penalty": best.soft_penalty,
+                    "is_valid": best.is_valid,
+                    "execution_time_ms": elapsed_ms,
+                })
+
+                # Termination on Zero Hard Violations
+                if best.hard_violations == 0:
+                    if config.target_soft_penalty is None or best.soft_penalty <= config.target_soft_penalty:
+                        run_status = "TARGET_REACHED"
+                        break
 
         final_best = population.get_best()
         final_elapsed_ms = int((time.time() - start_time) * 1000)
+
+        if final_best.hard_violations == 0 and run_status == "MAX_GENERATIONS_REACHED":
+            run_status = "TARGET_REACHED"
 
         return GARunResult(
             status=run_status,

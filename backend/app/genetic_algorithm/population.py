@@ -12,9 +12,12 @@ class Population:
     generation: int = 0
 
     def sort_by_fitness(self) -> None:
-        """Sort chromosomes ascending by fitness cost (lower is better)."""
+        """Sort chromosomes ascending by fitness cost (lower penalty is better)."""
         self.chromosomes.sort(
-            key=lambda c: (c.fitness if c.fitness is not None else float("inf"))
+            key=lambda c: (
+                c.hard_violations,
+                c.fitness if c.fitness is not None else float("inf"),
+            )
         )
 
     def get_best(self) -> Optional[Chromosome]:
@@ -48,22 +51,24 @@ class PopulationGenerator:
         population_size: int = 100,
         random_seed: Optional[int] = None,
     ) -> Population:
-        """Generate initial candidate timetable population."""
+        """Generate initial candidate timetable population with capacity-aware assignment."""
         rng = random.Random(random_seed) if random_seed is not None else random.Random()
 
         available_slot_ids = list(dataset.slot_details.keys())
         available_room_ids = list(dataset.room_capacities.keys())
-        all_exams = list(dataset.all_exam_ids)
+        all_exams = sorted(list(dataset.all_exam_ids))
 
         if not available_slot_ids or not available_room_ids:
             raise ValueError("Cannot generate population: No available slots or rooms in problem dataset.")
 
         chromosomes: List[Chromosome] = []
 
-        for _ in range(population_size):
+        for p_idx in range(population_size):
             genes: List[Gene] = []
-            for exam_id in all_exams:
-                # Check locked assignment
+            # Rotate starting slot to distribute exams evenly across dates
+            slot_offset = p_idx % len(available_slot_ids)
+
+            for e_idx, exam_id in enumerate(all_exams):
                 if exam_id in dataset.locked_assignments:
                     locked = dataset.locked_assignments[exam_id]
                     gene = Gene(
@@ -74,12 +79,25 @@ class PopulationGenerator:
                         is_locked=True,
                     )
                 else:
-                    slot_id = rng.choice(available_slot_ids)
-                    room_id = rng.choice(available_room_ids)
+                    # Capacity-aware room selection
+                    sub_id = dataset.exam_subject_map.get(exam_id)
+                    student_count = dataset.subject_students_count.get(sub_id, 0) if sub_id else 0
+                    valid_rooms = [
+                        r for r in available_room_ids
+                        if dataset.room_capacities.get(r, 0) >= student_count
+                    ]
+                    chosen_room = rng.choice(valid_rooms) if valid_rooms else rng.choice(available_room_ids)
+
+                    # Slot selection with even dispersion in 50% of the population
+                    if p_idx % 2 == 0 and len(available_slot_ids) > 1:
+                        chosen_slot = available_slot_ids[(e_idx + slot_offset) % len(available_slot_ids)]
+                    else:
+                        chosen_slot = rng.choice(available_slot_ids)
+
                     gene = Gene(
                         exam_id=exam_id,
-                        slot_id=slot_id,
-                        room_id=room_id,
+                        slot_id=chosen_slot,
+                        room_id=chosen_room,
                         is_locked=False,
                     )
                 genes.append(gene)

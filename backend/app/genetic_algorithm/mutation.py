@@ -14,7 +14,7 @@ class TimetableMutation:
         mutation_rate: float = 0.10,
         rng: Optional[random.Random] = None,
     ) -> Chromosome:
-        """Apply random mutation operators while preserving locked assignments."""
+        """Apply random mutation operators while preserving locked assignments and room capacity."""
         _rng = rng if rng is not None else random.Random()
 
         available_slots = list(dataset.slot_details.keys())
@@ -38,7 +38,10 @@ class TimetableMutation:
                     gene.slot_id = _rng.choice(available_slots)
 
                 elif op_choice == "ROOM":
-                    gene.room_id = _rng.choice(available_rooms)
+                    sub_id = dataset.exam_subject_map.get(gene.exam_id)
+                    num_students = dataset.subject_students_count.get(sub_id, 0) if sub_id else 0
+                    valid_rooms = [r for r in available_rooms if dataset.room_capacities.get(r, 0) >= num_students]
+                    gene.room_id = _rng.choice(valid_rooms) if valid_rooms else _rng.choice(available_rooms)
 
                 elif op_choice == "SWAP" and len(unlocked_genes) > 1:
                     other_gene = _rng.choice(unlocked_genes)

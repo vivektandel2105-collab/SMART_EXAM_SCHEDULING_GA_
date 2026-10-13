@@ -127,3 +127,31 @@ def enroll_student_in_subject(
     db.commit()
     db.refresh(enrollment)
     return enrollment
+
+
+@router.get("/enrollments/all")
+def get_all_enrollments(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List all student subject enrollments with student and subject details."""
+    from app.models.subject import Subject
+    records = db.query(StudentSubject, Student, Subject).join(
+        Student, StudentSubject.student_id == Student.id
+    ).join(
+        Subject, StudentSubject.subject_id == Subject.id
+    ).all()
+
+    res = []
+    for enr, st, sub in records:
+        res.append({
+            "id": enr.id,
+            "student_id": st.id,
+            "roll_number": st.roll_number,
+            "student_name": st.name,
+            "subject_id": sub.id,
+            "subject_code": sub.subject_code,
+            "subject_name": sub.subject_name,
+        })
+    return res
+

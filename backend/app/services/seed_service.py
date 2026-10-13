@@ -124,15 +124,31 @@ def seed_database(db: Session):
         if not db.query(Faculty).filter(Faculty.employee_id == f["employee_id"]).first():
             db.add(Faculty(**f))
 
-    # 7. Subjects
+    # 7. Subjects & Exams
     subjects_data = [
         {"subject_code": "CSE3001", "subject_name": "Database Management Systems", "department_id": cs_dept.id, "program_id": btech_cs.id, "semester_id": sem6.id, "exam_duration_minutes": 180},
         {"subject_code": "CSE3002", "subject_name": "Operating Systems", "department_id": cs_dept.id, "program_id": btech_cs.id, "semester_id": sem6.id, "exam_duration_minutes": 180},
         {"subject_code": "CSE3003", "subject_name": "Computer Networks", "department_id": cs_dept.id, "program_id": btech_cs.id, "semester_id": sem6.id, "exam_duration_minutes": 180},
     ]
+    created_subs = []
     for s in subjects_data:
-        if not db.query(Subject).filter(Subject.subject_code == s["subject_code"]).first():
-            db.add(Subject(**s))
+        sub = db.query(Subject).filter(Subject.subject_code == s["subject_code"]).first()
+        if not sub:
+            sub = Subject(**s)
+            db.add(sub)
+            db.flush()
+        created_subs.append(sub)
+
+        # Ensure Exam record exists
+        from app.models.exam import Exam
+        if not db.query(Exam).filter(Exam.subject_id == sub.id).first():
+            db.add(Exam(subject_id=sub.id, exam_duration_minutes=sub.exam_duration_minutes or 180, status="PENDING"))
+
+    # Enroll student in subjects
+    if student_rec and created_subs:
+        for sub in created_subs:
+            if not db.query(StudentSubject).filter(StudentSubject.student_id == student_rec.id, StudentSubject.subject_id == sub.id).first():
+                db.add(StudentSubject(student_id=student_rec.id, subject_id=sub.id))
 
     # 8. Exam Slots
     base_date = datetime.date(2026, 12, 10)
@@ -140,6 +156,7 @@ def seed_database(db: Session):
         {"exam_date": base_date, "start_time": datetime.time(9, 0), "end_time": datetime.time(12, 0), "session_name": "MORNING"},
         {"exam_date": base_date, "start_time": datetime.time(14, 0), "end_time": datetime.time(17, 0), "session_name": "AFTERNOON"},
         {"exam_date": base_date + datetime.timedelta(days=1), "start_time": datetime.time(9, 0), "end_time": datetime.time(12, 0), "session_name": "MORNING"},
+        {"exam_date": base_date + datetime.timedelta(days=1), "start_time": datetime.time(14, 0), "end_time": datetime.time(17, 0), "session_name": "AFTERNOON"},
     ]
     for slot in slots_data:
         existing = db.query(ExamSlot).filter(

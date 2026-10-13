@@ -298,3 +298,36 @@ def export_timetable(
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/versions/{version_id}/export-csv")
+def export_timetable_csv_endpoint(
+    version_id: str,
+    db: Session = Depends(get_db),
+):
+    """Export timetable version as a standard CSV file meeting Core Feature Six."""
+    try:
+        csv_content = timetable_service.export_timetable_csv(db, version_id)
+        filename = f"Timetable_Version_{version_id[:8]}.csv"
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/versions/{version_id}/validate")
+def validate_timetable_version_endpoint(
+    version_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Run independent constraint validation on the specified timetable version."""
+    from app.services.constraint_validator import IndependentConstraintValidator
+    try:
+        report = IndependentConstraintValidator.validate_persisted_version(db, version_id)
+        return report.to_dict()
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
