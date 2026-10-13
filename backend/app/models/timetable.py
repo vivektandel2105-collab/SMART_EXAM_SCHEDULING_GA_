@@ -51,6 +51,7 @@ class SchedulerRun(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     timetable_id = Column(String(36), ForeignKey("timetables.id", ondelete="CASCADE"), nullable=False)
     configuration_json = Column(Text, nullable=True)
+    solution_json = Column(Text, nullable=True)
     random_seed = Column(Integer, nullable=True)
     started_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)

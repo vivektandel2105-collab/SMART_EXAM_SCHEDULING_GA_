@@ -58,6 +58,21 @@ export default function LoginView() {
     finally { setLoading(false); }
   };
 
+  const handleQuickDemoLogin = async () => {
+    setLoading(true); clearMessages();
+    try {
+      await login('admin@smartexam.edu', 'Admin@123');
+    } catch (err) {
+      try {
+        await login('admin@smartexam.com', 'AdminPass123');
+      } catch (err2) {
+        setError(String(formatApiError(err2)));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleRegisterSubmit = async (e) => {
     e.preventDefault(); clearMessages();
     if (![fullName, studentId, regEmail, regPassword, confirmPassword].every(v => v.trim())) {
@@ -169,6 +184,15 @@ export default function LoginView() {
               </Field>
               <button type="submit" disabled={loading} className={`w-full py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition disabled:opacity-50 ${portalTab === 'student' ? 'bg-gradient-to-r from-cyan-500 via-blue-600 to-violet-600 shadow-lg shadow-cyan-500/20 text-white' : 'bg-gradient-to-r from-violet-600 to-indigo-600 shadow-lg shadow-violet-500/20 text-white'}`}>
                 {loading ? 'Signing in...' : portalTab === 'student' ? 'Sign In as User' : 'Sign In as Admin'} {!loading && <ArrowRight className="w-4 h-4" />}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleQuickDemoLogin}
+                disabled={loading}
+                className="w-full py-2.5 rounded-2xl border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-bold text-xs flex items-center justify-center gap-2 transition"
+              >
+                <span>⚡ 1-Click Demo Sign-in (Exam Administrator)</span>
               </button>
               {portalTab === 'student' && <button type="button" onClick={() => { setIsRegistering(true); clearMessages(); }} className="w-full text-sm text-cyan-600 hover:text-cyan-700 font-semibold pt-1">New user? Create an account</button>}
             </form>

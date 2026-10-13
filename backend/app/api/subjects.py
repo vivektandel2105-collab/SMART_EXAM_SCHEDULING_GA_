@@ -52,6 +52,16 @@ def create_subject(
 
     subject = Subject(**subject_in.model_dump())
     db.add(subject)
+    db.flush()
+
+    from app.models.exam import Exam
+    if not db.query(Exam).filter(Exam.subject_id == subject.id).first():
+        db.add(Exam(
+            subject_id=subject.id,
+            exam_duration_minutes=subject.exam_duration_minutes or 180,
+            status="PENDING",
+        ))
+
     db.commit()
     db.refresh(subject)
     return subject

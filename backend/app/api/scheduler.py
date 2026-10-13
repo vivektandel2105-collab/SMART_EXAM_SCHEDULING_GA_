@@ -1,5 +1,6 @@
 import json
 import threading
+import datetime
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, Field
@@ -9,7 +10,7 @@ from app.core.database import SessionLocal
 from app.api.deps import get_db, get_current_user, require_roles
 from app.models.user import User, UserRole
 from app.models.timetable import Timetable, SchedulerRun, SchedulerMetric, TimetableVersion
-from app.genetic_algorithm.engine import GAConfig
+from app.genetic_algorithm.engine import GeneticAlgorithmEngine, GAConfig
 from app.services import scheduler_service
 
 router = APIRouter()
@@ -322,3 +323,169 @@ def save_scheduler_timetable_version(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/sample-data")
+def load_sample_dataset_endpoint(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.EXAM_ADMIN)),
+):
+    """Seed a realistic, verifiable college examination dataset:
+    10 subjects, 5 rooms, 200 students, and 5 examination days (10 slots).
+    """
+    res = scheduler_service.seed_sample_problem_data(db)
+    return res
+
+
+@router.post("/clear-data")
+def clear_all_scheduling_data_endpoint(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.EXAM_ADMIN)),
+):
+    """Delete all loaded academic scheduling data (timetables, exams, subjects, students,
+    enrollments, rooms, slots) while preserving administrator and system users.
+    """
+    res = scheduler_service.clear_all_scheduling_data(db)
+    return res
+
+
+
+@router.get("/runs/{run_id}/validate")
+def validate_run_solution_endpoint(
+    run_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.EXAM_ADMIN)),
+):
+    """Run independent constraint validation on the candidate solution of a scheduler run."""
+    from app.services.constraint_validator import IndependentConstraintValidator
+    from app.genetic_algorithm.chromosome import Chromosome, Gene
+
+    run_record = db.query(SchedulerRun).filter(SchedulerRun.id == run_id).first()
+    if not run_record:
+        raise HTTPException(status_code=404, detail=f"Scheduler run '{run_id}' not found.")
+
+    dataset = scheduler_service.build_problem_dataset(db)
+    run_info = scheduler_service.ACTIVE_RUNS.get(run_id, {})
+    best_chromosome = run_info.get("best_chromosome")
+
+    if not best_chromosome and run_record.solution_json:
+        try:
+            gene_dicts = json.loads(run_record.solution_json)
+            best_chromosome = Chromosome(genes=[Gene.from_dict(gd) for gd in gene_dicts])
+        except Exception:
+            pass
+
+    if not best_chromosome:
+        raise HTTPException(status_code=400, detail="No solution chromosome found for this run.")
+
+    report = IndependentConstraintValidator.validate_chromosome(best_chromosome.genes, dataset)
+    return report.to_dict()
+
+
+@router.post("/generate-sync")
+def generate_timetable_sync(
+    req: GenerateTimetableRequest = GenerateTimetableRequest(),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.EXAM_ADMIN)),
+):
+    """Synchronously execute Genetic Algorithm, save timetable version, and return validation report."""
+    from app.services.constraint_validator import IndependentConstraintValidator
+
+    dataset = scheduler_service.build_problem_dataset(db)
+    val_report = scheduler_service.validate_dataset(dataset)
+    if not val_report["is_valid"]:
+        raise HTTPException(status_code=400, detail="; ".join(val_report["errors"]))
+
+    # Find or create Timetable
+    timetable = None
+    if req.timetable_id:
+        timetable = db.query(Timetable).filter(Timetable.id == req.timetable_id).first()
+    if not timetable:
+        timetable = Timetable(
+            name=req.timetable_name,
+            academic_year=req.academic_year,
+            status="GENERATED",
+            created_by=current_user.id,
+        )
+        db.add(timetable)
+        db.commit()
+        db.refresh(timetable)
+
+    config = GAConfig(
+        population_size=req.population_size,
+        max_generations=req.max_generations,
+        crossover_rate=req.crossover_rate,
+        mutation_rate=req.mutation_rate,
+        elite_count=req.elite_count,
+        tournament_size=req.tournament_size,
+        random_seed=req.random_seed,
+        time_limit_seconds=req.time_limit_seconds,
+    )
+
+    scheduler_run = SchedulerRun(
+        timetable_id=timetable.id,
+        configuration_json=json.dumps({
+            "population_size": req.population_size,
+            "max_generations": req.max_generations,
+            "crossover_rate": req.crossover_rate,
+            "mutation_rate": req.mutation_rate,
+            "elite_count": req.elite_count,
+            "tournament_size": req.tournament_size,
+            "time_limit_seconds": req.time_limit_seconds,
+        }),
+        random_seed=req.random_seed,
+        status="RUNNING",
+    )
+    db.add(scheduler_run)
+    db.commit()
+    db.refresh(scheduler_run)
+
+    result = GeneticAlgorithmEngine.run(dataset=dataset, config=config)
+
+    for metric in result.metrics_history:
+        db_metric = SchedulerMetric(
+            scheduler_run_id=scheduler_run.id,
+            generation=metric["generation"],
+            best_fitness=metric["best_fitness"],
+            hard_violations=metric["hard_violations"],
+            soft_penalty=metric["soft_penalty"],
+            execution_time_ms=metric["execution_time_ms"],
+        )
+        db.add(db_metric)
+
+    scheduler_run.status = "COMPLETED"
+    scheduler_run.solution_json = json.dumps([g.to_dict() for g in result.best_chromosome.genes])
+    scheduler_run.completed_at = datetime.datetime.utcnow()
+    db.commit()
+
+    scheduler_service.ACTIVE_RUNS[scheduler_run.id] = {
+        "status": "COMPLETED",
+        "best_chromosome": result.best_chromosome,
+        "result": result,
+    }
+
+    # Automatically persist TimetableVersion
+    version = scheduler_service.save_run_result_as_timetable_version(
+        db=db,
+        scheduler_run_id=scheduler_run.id,
+        user_id=current_user.id,
+    )
+
+    # Run independent validation
+    independent_validation = IndependentConstraintValidator.validate_persisted_version(db, version.id)
+
+    return {
+        "scheduler_run_id": scheduler_run.id,
+        "timetable_id": timetable.id,
+        "timetable_version_id": version.id,
+        "status": result.status,
+        "generation": result.generation,
+        "best_fitness": result.best_fitness,
+        "hard_violations": result.hard_violations,
+        "soft_penalty": result.soft_penalty,
+        "execution_time_ms": result.execution_time_ms,
+        "is_valid": independent_validation.is_valid,
+        "validation_report": independent_validation.to_dict(),
+        "total_assignments": len(version.assignments),
+    }
+

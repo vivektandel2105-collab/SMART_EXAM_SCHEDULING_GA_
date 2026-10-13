@@ -1,63 +1,41 @@
 import React, { useState, useEffect } from 'react';
-import api from '../services/api';
-import Card from '../components/common/Card';
-import Button from '../components/common/Button';
-import Badge from '../components/common/Badge';
-import ProgressBar from '../components/common/ProgressBar';
-import Table from '../components/common/Table';
-import LoadingSkeleton from '../components/common/LoadingSkeleton';
+import api, { formatApiError } from '../services/api';
 import { 
-  Users, 
   BookOpen, 
   DoorOpen, 
-  UserCheck, 
-  Cpu, 
-  Upload, 
-  Sliders, 
-  Calendar, 
-  FileSpreadsheet, 
+  CalendarDays, 
+  Users, 
+  Play, 
+  DatabaseZap, 
+  CheckCircle2, 
+  AlertTriangle, 
+  XCircle, 
+  Clock, 
+  Activity, 
   ArrowRight,
-  Activity,
-  CheckCircle2,
-  Clock,
-  Zap,
-  TrendingUp,
+  RefreshCw,
+  Sliders,
   ShieldCheck,
-  Sparkles
+  Calendar,
+  Trash2
 } from 'lucide-react';
-import { 
-  LineChart, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer, 
-  Legend 
-} from 'recharts';
 
 export default function DashboardView({ setActiveView }) {
   const [stats, setStats] = useState({
-    studentsCount: 2450,
-    subjectsCount: 42,
-    roomsCount: 18,
-    facultyCount: 35,
-    slotsCount: 12,
+    totalExams: 0,
+    totalRooms: 0,
+    totalSlots: 0,
+    totalStudents: 0,
+    totalEnrollments: 0,
+    maxRoomCapacity: 0,
   });
 
-  const [gaStatus, setGaStatus] = useState({
-    status: 'READY',
-    generation: 142,
-    maxGenerations: 500,
-    bestFitness: 25,
-    hardViolations: 0,
-    softPenalty: 25,
-    executionTimeSec: 14.8,
-  });
-
+  const [validationReport, setValidationReport] = useState(null);
   const [recentRuns, setRecentRuns] = useState([]);
-  const [chartData, setChartData] = useState([]);
+  const [latestRun, setLatestRun] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [notification, setNotification] = useState(null);
 
   useEffect(() => {
     fetchDashboardData();
@@ -66,49 +44,41 @@ export default function DashboardView({ setActiveView }) {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const [valRes, stRes, subRes, rmRes, facRes, runsRes] = await Promise.allSettled([
-        api.get('/scheduler/validate'),
-        api.get('/students'),
+      const [valRes, subsRes, rmsRes, slotsRes, stdsRes, runsRes, enrRes] = await Promise.allSettled([
+        api.post('/scheduler/validate'),
         api.get('/subjects'),
         api.get('/rooms'),
-        api.get('/faculty'),
+        api.get('/exam-slots'),
+        api.get('/students'),
         api.get('/scheduler/runs?limit=5'),
+        api.get('/students/enrollments/all'),
       ]);
 
-      const valData = valRes.status === 'fulfilled' ? valRes.value.data : {};
+      const valData = valRes.status === 'fulfilled' ? valRes.value.data : null;
+      setValidationReport(valData);
+
+      const subjects = subsRes.status === 'fulfilled' ? subsRes.value.data : [];
+      const rooms = rmsRes.status === 'fulfilled' ? rmsRes.value.data : [];
+      const slots = slotsRes.status === 'fulfilled' ? slotsRes.value.data : [];
+      const students = stdsRes.status === 'fulfilled' ? stdsRes.value.data : [];
       const runs = runsRes.status === 'fulfilled' ? runsRes.value.data : [];
+      const enrollments = enrRes.status === 'fulfilled' ? enrRes.value.data : [];
 
       setStats({
-        studentsCount: stRes.status === 'fulfilled' ? (stRes.value.data.total || stRes.value.data.length || 2450) : 2450,
-        subjectsCount: subRes.status === 'fulfilled' ? (subRes.value.data.length || 42) : 42,
-        roomsCount: valData.total_available_rooms || (rmRes.status === 'fulfilled' ? rmRes.value.data.length : 18),
-        facultyCount: facRes.status === 'fulfilled' ? facRes.value.data.length : 35,
-        slotsCount: valData.total_available_slots || 12,
+        totalExams: valData?.total_exams ?? (Array.isArray(subjects) ? subjects.length : 0),
+        totalRooms: valData?.total_available_rooms ?? (Array.isArray(rooms) ? rooms.length : 0),
+        totalSlots: valData?.total_available_slots ?? (Array.isArray(slots) ? slots.length : 0),
+        totalStudents: Array.isArray(students) ? students.length : 0,
+        totalEnrollments: Array.isArray(enrollments) ? enrollments.length : 0,
+        maxRoomCapacity: valData?.max_room_capacity ?? 0,
       });
 
       if (Array.isArray(runs) && runs.length > 0) {
         setRecentRuns(runs);
-        const latestRun = runs[0];
-        setGaStatus(prev => ({
-          ...prev,
-          status: latestRun.status || 'READY',
-        }));
-
-        // Fetch metrics for latest run
-        const mRes = await api.get(`/scheduler/runs/${latestRun.id}/metrics`);
-        if (Array.isArray(mRes.data) && mRes.data.length > 0) {
-          setChartData(mRes.data);
-          const lastM = mRes.data[mRes.data.length - 1];
-          setGaStatus({
-            status: latestRun.status,
-            generation: lastM.generation,
-            maxGenerations: 500,
-            bestFitness: Math.round(lastM.best_fitness),
-            hardViolations: lastM.hard_violations,
-            softPenalty: Math.round(lastM.soft_penalty),
-            executionTimeSec: (lastM.execution_time_ms / 1000).toFixed(1),
-          });
-        }
+        setLatestRun(runs[0]);
+      } else {
+        setRecentRuns([]);
+        setLatestRun(null);
       }
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
@@ -117,226 +87,278 @@ export default function DashboardView({ setActiveView }) {
     }
   };
 
-  const kpiCards = [
-    { label: 'Total Students', value: stats.studentsCount.toLocaleString(), trend: '+8.2% from previous semester', icon: Users, color: 'blue' },
-    { label: 'Total Subjects', value: stats.subjectsCount, trend: 'Enrolled in current term', icon: BookOpen, color: 'indigo' },
-    { label: 'Total Rooms', value: stats.roomsCount, trend: 'Active examination halls', icon: DoorOpen, color: 'emerald' },
-    { label: 'Total Faculty', value: stats.facultyCount, trend: 'Invigilation supervisors', icon: UserCheck, color: 'violet' },
-  ];
+  const handleLoadSampleData = async () => {
+    if (!window.confirm('Load sample problem data? This will populate 10 subjects, 5 rooms, 200 students, and 5 examination days.')) {
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const res = await api.post('/scheduler/sample-data');
+      setNotification({
+        type: 'success',
+        message: 'Sample dataset loaded successfully! (10 Subjects, 5 Rooms, 200 Students, 10 Slots)',
+      });
+      await fetchDashboardData();
+    } catch (err) {
+      setNotification({
+        type: 'error',
+        message: formatApiError(err) || 'Failed to seed sample dataset.',
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
-  const quickActions = [
-    { id: 'import', title: 'Import Data', desc: 'Upload student, subject, room, and slot Excel/CSV files.', icon: Upload, view: 'import' },
-    { id: 'rooms', title: 'Manage Rooms', desc: 'Configure room capacities, seating layouts, and availability.', icon: DoorOpen, view: 'data-rooms' },
-    { id: 'constraints', title: 'Configure Constraints', desc: 'Tune zero-violation hard rules and soft penalty weights.', icon: Sliders, view: 'constraints' },
-    { id: 'scheduler', title: 'Generate Timetable', desc: 'Run the Genetic Algorithm to create an optimized schedule.', icon: Cpu, view: 'scheduler' },
-    { id: 'timetables', title: 'View Timetable', desc: 'Inspect grid matrix, lock assignments, and export Excel.', icon: Calendar, view: 'timetables' },
-    { id: 'reports', title: 'Generate Reports', desc: 'Export PDF/Excel schedules for students, faculty, and exam cell.', icon: FileSpreadsheet, view: 'reports' },
-  ];
+  const handleClearAllData = async () => {
+    if (!window.confirm('Delete ALL loaded academic data (subjects, exams, rooms, slots, students, and timetables)? This will clear the scheduling dataset.')) {
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const res = await api.post('/scheduler/clear-data');
+      setNotification({
+        type: 'success',
+        message: res.data.message || 'All loaded academic scheduling data has been deleted.',
+      });
+      await fetchDashboardData();
+    } catch (err) {
+      setNotification({
+        type: 'error',
+        message: formatApiError(err) || 'Failed to clear scheduling data.',
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
-  const runTableColumns = [
-    { title: 'Run ID', key: 'id', render: (val) => <span className="font-mono text-[#3B82F6] font-bold">{val.substring(0, 8)}...</span> },
-    { title: 'Started At', key: 'started_at', render: (val) => val ? new Date(val).toLocaleString() : 'N/A' },
-    { title: 'Seed', key: 'random_seed', render: (val) => val ?? 'Auto' },
-    { title: 'Status', key: 'status', render: (val) => <Badge pulse={val === 'RUNNING'}>{val}</Badge> },
-    { 
-      title: 'Action', 
-      key: 'actions', 
-      align: 'right',
-      render: (_, row) => (
-        <Button variant="ghost" size="sm" onClick={() => setActiveView('scheduler')}>
-          View Details
-        </Button>
-      ) 
-    },
-  ];
+  const handleQuickGenerate = () => {
+    setActiveView('timetables');
+  };
 
   return (
-    <div className="space-y-8 animate-fadeIn">
-      {/* Welcome Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 rounded-3xl bg-gradient-to-r from-white via-white to-[#F3F7FE] border border-slate-200 shadow-2xl relative overflow-hidden">
-        <div className="space-y-1 relative z-10">
-          <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-600 border border-blue-500/20 mb-1">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Examination Scheduling Overview</span>
-          </div>
-          <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight font-manrope">
-            Good morning, System Admin
-          </h2>
-          <p className="text-xs text-slate-600 max-w-xl">
-            SmartExam Genetic Algorithm solver ready for conflict-free examination schedule generation.
-          </p>
-        </div>
-
-        <div className="flex items-center space-x-3 relative z-10">
-          <Button variant="secondary" size="md" icon={Upload} onClick={() => setActiveView('import')}>
-            Import Data
-          </Button>
-          <Button variant="primary" size="md" icon={Zap} onClick={() => setActiveView('scheduler')}>
-            Run GA Scheduler
-          </Button>
-        </div>
-      </div>
-
-      {/* 4 Top KPI Cards */}
-      {loading ? (
-        <LoadingSkeleton count={4} />
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          {kpiCards.map((card, idx) => {
-            const Icon = card.icon;
-            return (
-              <div key={idx} className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xl hover:border-blue-300 transition">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-600 flex items-center justify-center">
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 flex items-center">
-                    <TrendingUp className="w-3 h-3 mr-1" /> Active
-                  </span>
-                </div>
-                <div className="text-2xl font-black text-slate-900 font-manrope mb-1">
-                  {card.value}
-                </div>
-                <div className="text-xs font-semibold text-slate-700">{card.label}</div>
-                <div className="text-[11px] text-slate-500 mt-1">{card.trend}</div>
-              </div>
-            );
-          })}
+    <div className="space-y-6">
+      {/* Toast Notification */}
+      {notification && (
+        <div className={`p-4 rounded-2xl border flex items-center justify-between text-xs font-semibold ${
+          notification.type === 'success' 
+            ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+            : 'bg-rose-50 text-rose-800 border-rose-200'
+        }`}>
+          <span>{notification.message}</span>
+          <button onClick={() => setNotification(null)} className="ml-4 underline font-bold">Dismiss</button>
         </div>
       )}
 
-      {/* Genetic Algorithm Status Card & Optimization Progress Chart */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* GA Engine Prominent Card */}
-        <Card
-          title="Genetic Algorithm Engine"
-          subtitle="Multi-objective optimization status"
-          icon={Cpu}
-          action={<Badge pulse={gaStatus.status === 'RUNNING'}>{gaStatus.status}</Badge>}
-          className="lg:col-span-1"
-        >
-          <div className="space-y-5">
-            <div>
-              <ProgressBar
-                value={gaStatus.generation}
-                max={gaStatus.maxGenerations}
-                label={`Generation ${gaStatus.generation} / ${gaStatus.maxGenerations}`}
-                color={gaStatus.status === 'RUNNING' ? 'blue' : 'emerald'}
-              />
-            </div>
+      {/* Top Banner: Workflow Overview & Fast Actions */}
+      <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white rounded-3xl p-6 md:p-8 shadow-xl relative overflow-hidden">
+        <div className="relative z-10 max-w-3xl space-y-3">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-200 text-xs font-bold tracking-wide uppercase">
+            <Activity className="w-3.5 h-3.5" /> AI Genetic Algorithm Engine
+          </div>
+          <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">
+            Automated Exam Timetable Scheduling
+          </h1>
+          <p className="text-sm md:text-base text-slate-300 leading-relaxed">
+            Eliminate student exam clashes, room overbooking, and capacity bottlenecks using an optimized Genetic Algorithm with independent constraint verification.
+          </p>
 
-            <div className="grid grid-cols-2 gap-3 text-xs font-mono">
-              <div className="p-3 rounded-xl bg-white border border-slate-100">
-                <div className="text-slate-600 text-[10px] font-sans">Best Fitness</div>
-                <div className="text-lg font-bold text-blue-600">{gaStatus.bestFitness}</div>
-              </div>
-              <div className="p-3 rounded-xl bg-white border border-slate-100">
-                <div className="text-slate-600 text-[10px] font-sans">Hard Violations</div>
-                <div className={`text-lg font-bold ${gaStatus.hardViolations === 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-                  {gaStatus.hardViolations}
-                </div>
-              </div>
-              <div className="p-3 rounded-xl bg-white border border-slate-100">
-                <div className="text-slate-600 text-[10px] font-sans">Soft Penalty</div>
-                <div className="text-lg font-bold text-violet-600">{gaStatus.softPenalty}</div>
-              </div>
-              <div className="p-3 rounded-xl bg-white border border-slate-100">
-                <div className="text-slate-600 text-[10px] font-sans">Execution Time</div>
-                <div className="text-lg font-bold text-slate-800">{gaStatus.executionTimeSec}s</div>
-              </div>
-            </div>
-
-            <Button
-              variant="primary"
-              size="md"
-              className="w-full"
-              icon={ArrowRight}
-              onClick={() => setActiveView('scheduler')}
+          <div className="pt-3 flex flex-wrap items-center gap-3">
+            <button
+              onClick={handleQuickGenerate}
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-sm shadow-lg shadow-amber-500/20 transition-transform active:scale-95"
             >
-              View GA Studio
-            </Button>
-          </div>
-        </Card>
+              <Play className="w-4 h-4 fill-current" />
+              <span>Generate Timetable</span>
+            </button>
 
-        {/* Optimization Progress Chart */}
-        <Card
-          title="Optimization Progress"
-          subtitle="Generational fitness cost reduction"
-          icon={Activity}
-          className="lg:col-span-2"
-        >
-          <div className="h-64 w-full">
-            {chartData.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-slate-500 text-xs space-y-2">
-                <Activity className="w-8 h-8 text-slate-400" />
-                <p>No active optimization run metrics recorded yet.</p>
-                <Button variant="secondary" size="sm" onClick={() => setActiveView('scheduler')}>
-                  Launch GA Optimization
-                </Button>
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#EEF2F7" />
-                  <XAxis dataKey="generation" stroke="#64748B" fontSize={11} />
-                  <YAxis stroke="#64748B" fontSize={11} />
-                  <Tooltip contentStyle={{ backgroundColor: '#FFFFFF', borderColor: '#E2E8F0', borderRadius: '12px', fontSize: '12px' }} />
-                  <Legend wrapperStyle={{ fontSize: '12px' }} />
-                  <Line type="monotone" dataKey="hard_violations" name="Hard Violations" stroke="#EF4444" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="soft_penalty" name="Soft Penalty Cost" stroke="#3B82F6" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </Card>
-      </div>
+            <button
+              onClick={handleLoadSampleData}
+              disabled={actionLoading}
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-sm border border-white/20 backdrop-blur-md transition active:scale-95"
+            >
+              <DatabaseZap className="w-4 h-4 text-emerald-400" />
+              <span>{actionLoading ? 'Loading Sample...' : 'Load Sample Data'}</span>
+            </button>
 
-      {/* Quick Actions Grid (6 Cards) */}
-      <div className="space-y-4">
-        <h3 className="text-base font-bold text-slate-900 font-manrope flex items-center">
-          <Zap className="w-4 h-4 mr-2 text-blue-600" /> Quick Administrative Actions
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {quickActions.map((act) => {
-            const Icon = act.icon;
-            return (
-              <div
-                key={act.id}
-                onClick={() => setActiveView(act.view)}
-                className="bg-white border border-slate-200 p-5 rounded-2xl hover:bg-blue-50 hover:border-blue-300 cursor-pointer transition group flex flex-col justify-between"
-              >
-                <div>
-                  <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-600 flex items-center justify-center mb-3 group-hover:scale-110 transition">
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <h4 className="text-sm font-bold text-slate-900 group-hover:text-blue-400 transition font-manrope mb-1">
-                    {act.title}
-                  </h4>
-                  <p className="text-xs text-slate-600 leading-relaxed">{act.desc}</p>
-                </div>
-                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-blue-600 group-hover:translate-x-1 transition">
-                  <span>Open View</span>
-                  <ArrowRight className="w-4 h-4" />
-                </div>
-              </div>
-            );
-          })}
+            <button
+              onClick={handleClearAllData}
+              disabled={actionLoading}
+              className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 font-bold text-sm border border-rose-400/30 backdrop-blur-md transition active:scale-95"
+              title="Delete all loaded academic data"
+            >
+              <Trash2 className="w-4 h-4 text-rose-400" />
+              <span>Delete All Data</span>
+            </button>
+
+            <button
+              onClick={fetchDashboardData}
+              className="p-3 rounded-2xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 transition"
+              title="Refresh Stats"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Recent Scheduler Runs Table */}
-      <Card
-        title="Recent Scheduler Runs"
-        subtitle="Historical Genetic Algorithm execution logs"
-        icon={Clock}
-      >
-        <Table
-          columns={runTableColumns}
-          data={recentRuns}
-          loading={loading}
-          emptyMessage="No recent scheduler executions recorded."
-        />
-      </Card>
+      {/* Metrics Cards: Real Input Data Counts */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {/* Total Examinations */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition">
+          <div className="flex items-center justify-between text-slate-500 mb-3">
+            <span className="text-xs font-bold uppercase tracking-wider">Examinations</span>
+            <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+              <BookOpen className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="text-3xl font-extrabold text-slate-900">{stats.totalExams}</div>
+          <div className="text-xs text-slate-500 mt-1">Required exam subjects</div>
+        </div>
+
+        {/* Available Rooms */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition">
+          <div className="flex items-center justify-between text-slate-500 mb-3">
+            <span className="text-xs font-bold uppercase tracking-wider">Exam Rooms</span>
+            <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <DoorOpen className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="text-3xl font-extrabold text-slate-900">{stats.totalRooms}</div>
+          <div className="text-xs text-slate-500 mt-1">Max capacity: {stats.maxRoomCapacity} seats</div>
+        </div>
+
+        {/* Available Time Slots */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition">
+          <div className="flex items-center justify-between text-slate-500 mb-3">
+            <span className="text-xs font-bold uppercase tracking-wider">Time Slots</span>
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <CalendarDays className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="text-3xl font-extrabold text-slate-900">{stats.totalSlots}</div>
+          <div className="text-xs text-slate-500 mt-1">Configured exam sessions</div>
+        </div>
+
+        {/* Students Enrolled */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition">
+          <div className="flex items-center justify-between text-slate-500 mb-3">
+            <span className="text-xs font-bold uppercase tracking-wider">Students</span>
+            <div className="w-9 h-9 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center">
+              <Users className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="text-3xl font-extrabold text-slate-900">{stats.totalStudents}</div>
+          <div className="text-xs text-slate-500 mt-1">{stats.totalEnrollments} subject enrollments</div>
+        </div>
+      </div>
+
+      {/* Dataset Readiness Banner */}
+      {validationReport && (
+        <div className={`p-5 rounded-2xl border flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+          validationReport.is_valid
+            ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+            : 'bg-amber-50/70 border-amber-200 text-amber-900'
+        }`}>
+          <div className="flex items-start gap-3">
+            {validationReport.is_valid ? (
+              <CheckCircle2 className="w-6 h-6 text-emerald-600 flex-shrink-0 mt-0.5" />
+            ) : (
+              <AlertTriangle className="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />
+            )}
+            <div>
+              <div className="text-sm font-bold">
+                {validationReport.is_valid
+                  ? 'Dataset Readiness Verified — Capacity & Resources Ready'
+                  : 'Scheduling Readiness Warning'}
+              </div>
+              <div className="text-xs text-slate-600 mt-1">
+                {validationReport.is_valid
+                  ? `Total scheduling slots: ${validationReport.total_capacity_slots} room-slots available for ${validationReport.total_exams} examinations.`
+                  : validationReport.errors?.join('; ') || validationReport.warnings?.join('; ')}
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setActiveView('data')}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-800 text-xs font-bold shadow-sm hover:bg-slate-50 self-start md:self-auto"
+          >
+            <span>Manage Input Data</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Scheduling Status & Recent History */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">Recent Genetic Algorithm Runs</h2>
+            <p className="text-xs text-slate-500">History of optimization runs and convergence states</p>
+          </div>
+          <button
+            onClick={() => setActiveView('timetables')}
+            className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1"
+          >
+            <span>View Full Timetable</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {recentRuns.length === 0 ? (
+          <div className="text-center py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-slate-500 text-xs">
+            No algorithm runs recorded yet. Click <strong>Generate Timetable</strong> above to start optimization.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
+                <tr>
+                  <th className="py-2.5 px-3 font-semibold">Run ID</th>
+                  <th className="py-2.5 px-3 font-semibold">Status</th>
+                  <th className="py-2.5 px-3 font-semibold">Random Seed</th>
+                  <th className="py-2.5 px-3 font-semibold">Started</th>
+                  <th className="py-2.5 px-3 font-semibold">Completed</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {recentRuns.map((run) => (
+                  <tr key={run.id} className="hover:bg-slate-50/70 transition">
+                    <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
+                      {run.id.slice(0, 8)}...
+                    </td>
+                    <td className="py-2.5 px-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                        run.status === 'COMPLETED'
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : run.status === 'RUNNING'
+                          ? 'bg-blue-50 text-blue-700 border border-blue-200 animate-pulse'
+                          : run.status === 'CANCELLED'
+                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                          : 'bg-rose-50 text-rose-700 border border-rose-200'
+                      }`}>
+                        {run.status}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 text-slate-600">{run.random_seed ?? 'Auto'}</td>
+                    <td className="py-2.5 px-3 text-slate-500">{run.started_at ? new Date(run.started_at).toLocaleTimeString() : 'N/A'}</td>
+                    <td className="py-2.5 px-3 text-slate-500">{run.completed_at ? new Date(run.completed_at).toLocaleTimeString() : 'In Progress'}</td>
+                    <td className="py-2.5 px-3 text-right">
+                      <button
+                        onClick={() => setActiveView('timetables')}
+                        className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[11px]"
+                      >
+                        Inspect
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -267,3 +267,77 @@ def export_timetable_excel(db: Session, version_id: str) -> io.BytesIO:
     wb.save(buffer)
     buffer.seek(0)
     return buffer
+
+
+def export_timetable_csv(db: Session, version_id: str) -> str:
+    """Exports actual timetable version assignments into standard CSV text matching Core Feature Six requirements."""
+    import csv
+    from app.models.student import StudentSubject
+
+    version = db.query(TimetableVersion).filter(TimetableVersion.id == version_id).first()
+    if not version:
+        raise ValueError(f"Timetable version '{version_id}' not found.")
+
+    assignments = (
+        db.query(ExamAssignment)
+        .filter(ExamAssignment.timetable_version_id == version_id)
+        .all()
+    )
+
+    if not assignments:
+        raise ValueError("Cannot export empty timetable: No examination assignments found in this version.")
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Core Feature Six CSV specification
+    writer.writerow([
+        "Examination ID",
+        "Subject Code",
+        "Subject Name",
+        "Examination Date",
+        "Start Time",
+        "End Time",
+        "Session",
+        "Assigned Room",
+        "Room Capacity",
+        "Enrolled Students Count",
+        "Validation Status",
+    ])
+
+    indexed_rows = []
+    for a in assignments:
+        exam = db.query(Exam).filter(Exam.id == a.exam_id).first() if a.exam_id else None
+        subject = db.query(Subject).filter(Subject.id == exam.subject_id).first() if exam and exam.subject_id else None
+        slot = db.query(ExamSlot).filter(ExamSlot.id == a.slot_id).first() if a.slot_id else None
+        room = db.query(Room).filter(Room.id == a.room_id).first() if a.room_id else None
+
+        enrolled_count = 0
+        if subject:
+            enrolled_count = db.query(StudentSubject).filter(StudentSubject.subject_id == subject.id).count()
+
+        e_date = str(slot.exam_date) if slot and slot.exam_date else "TBD"
+        s_time = str(slot.start_time) if slot and slot.start_time else "TBD"
+        e_time = str(slot.end_time) if slot and slot.end_time else "TBD"
+        session_name = slot.session_name if slot else "TBD"
+
+        row = [
+            a.exam_id,
+            subject.subject_code if subject else "N/A",
+            subject.subject_name if subject else "N/A",
+            e_date,
+            s_time,
+            e_time,
+            session_name,
+            room.room_number if room else "Unassigned",
+            room.capacity if room else 0,
+            enrolled_count,
+            "Valid (0 Violations)" if version.hard_violations == 0 else f"Invalid ({version.hard_violations} Violations)",
+        ]
+        indexed_rows.append(((e_date, s_time), row))
+
+    indexed_rows.sort(key=lambda x: x[0])
+    for _, row in indexed_rows:
+        writer.writerow(row)
+
+    return output.getvalue()
